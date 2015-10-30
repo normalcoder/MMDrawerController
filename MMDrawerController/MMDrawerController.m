@@ -140,6 +140,8 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
 @property (nonatomic, copy) MMDrawerGestureCompletionBlock gestureCompletion;
 @property (nonatomic, assign, getter = isAnimatingDrawer) BOOL animatingDrawer;
 
+@property (nonatomic, assign) BOOL isStatusBarCaptured;
+
 @end
 
 @implementation MMDrawerController
@@ -271,10 +273,10 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
 }
 
 -(void)closeOpenedDrawerAnimated:(BOOL)animated completion:(void (^)(BOOL finished))completion{
-    self.centerViewController.view.frame = (CGRect){
-        .origin = (CGPoint){0, MMDrawerDefaultVerticalTransitionOffset},
-        .size = self.centerContainerView.bounds.size
-    };
+//    self.centerViewController.view.frame = (CGRect){
+//        .origin = (CGPoint){0, MMDrawerDefaultVerticalTransitionOffset},
+//        .size = self.centerContainerView.bounds.size
+//    };
     
     [self closeDrawerAnimated:animated completion:completion];
 }
@@ -332,12 +334,17 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
              if(completion){
                  completion(finished);
              }
+             
+             [self releaseStatusBar];
+             NSLog(@"release status bar1");
          }];
     }
 }
 
 -(void)openDrawerSide:(MMDrawerSide)drawerSide animated:(BOOL)animated completion:(void (^)(BOOL finished))completion{
     NSParameterAssert(drawerSide != MMDrawerSideNone);
+    [self captureStatusBar];
+    NSLog(@"capture status bar2");
     
     [self openDrawerSide:drawerSide animated:animated velocity:self.animationVelocity animationOptions:UIViewAnimationOptionCurveEaseInOut completion:completion];
 }
@@ -1086,6 +1093,10 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
             else {
                 self.startingPanRect = self.centerContainerView.frame;
             }
+            if (self.startingPanRect.origin.x == 0) {
+                [self captureStatusBar];
+                NSLog(@"capture status bar1");
+            }
         }
         case UIGestureRecognizerStateChanged:{
             self.view.userInteractionEnabled = NO;
@@ -1153,7 +1164,8 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
 }
 
 -(UIViewController*)childViewControllerForStatusBarHidden{
-    return [self childViewControllerForSide:self.openSide];
+//    return [self childViewControllerForSide:self.openSide];
+    return nil;
 }
 
 -(void)setNeedsStatusBarAppearanceUpdateIfSupported{
@@ -1209,7 +1221,31 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
         if(completion){
             completion(NO);
         }
+        [self releaseStatusBar];
+        NSLog(@"release status bar2");
     }
+}
+
+
+//- (UIViewController *)childViewControllerForStatusBarHidden
+//{
+//    return nil;
+//}
+
+-(BOOL)prefersStatusBarHidden{
+    return self.isStatusBarCaptured;
+}
+
+-(void)captureStatusBar{
+    self.isStatusBarCaptured = YES;
+    [self setNeedsStatusBarAppearanceUpdate];
+//    [UIApplication sharedApplication].statusBarHidden = YES;
+}
+
+-(void)releaseStatusBar{
+    self.isStatusBarCaptured = NO;
+    [self setNeedsStatusBarAppearanceUpdate];
+//    [UIApplication sharedApplication].statusBarHidden = NO;
 }
 
 -(void)updateDrawerVisualStateForDrawerSide:(MMDrawerSide)drawerSide percentVisible:(CGFloat)percentVisible{
