@@ -50,6 +50,7 @@ CGFloat const MMDrawerOvershootLinearRangePercentage = 0.75f;
 CGFloat const MMDrawerOvershootPercentage = 0.1f;
 
 CGFloat const MMDrawerDefaultVerticalTransitionOffset = 20.0f;
+CGFloat const MMDrawerStatusBarHeight = 20.0f;
 
 typedef BOOL (^MMDrawerGestureShouldRecognizeTouchBlock)(MMDrawerController * drawerController, UIGestureRecognizer * gesture, UITouch * touch);
 typedef void (^MMDrawerGestureCompletionBlock)(MMDrawerController * drawerController, UIGestureRecognizer * gesture);
@@ -133,12 +134,15 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
 @property (nonatomic, strong) UIView * childControllerContainerView;
 @property (nonatomic, strong) MMDrawerCenterContainerView * centerContainerView;
 @property (nonatomic, strong) UIView * dummyStatusBarView;
+@property (nonatomic, strong) UIImageView * fakeStatusBarView;
 
 @property (nonatomic, assign) CGRect startingPanRect;
 @property (nonatomic, copy) MMDrawerControllerDrawerVisualStateBlock drawerVisualState;
 @property (nonatomic, copy) MMDrawerGestureShouldRecognizeTouchBlock gestureShouldRecognizeTouch;
 @property (nonatomic, copy) MMDrawerGestureCompletionBlock gestureCompletion;
 @property (nonatomic, assign, getter = isAnimatingDrawer) BOOL animatingDrawer;
+
+@property (nonatomic, assign) BOOL isStatusBarCaptured;
 
 @end
 
@@ -332,12 +336,15 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
              if(completion){
                  completion(finished);
              }
+             
+             [self releaseStatusBar];
          }];
     }
 }
 
 -(void)openDrawerSide:(MMDrawerSide)drawerSide animated:(BOOL)animated completion:(void (^)(BOOL finished))completion{
     NSParameterAssert(drawerSide != MMDrawerSideNone);
+    [self captureStatusBar];
     
     [self openDrawerSide:drawerSide animated:animated velocity:self.animationVelocity animationOptions:UIViewAnimationOptionCurveEaseInOut completion:completion];
 }
@@ -457,8 +464,14 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
         }
     }];
     
+    if (oldCenterViewController.preferredStatusBarStyle != UIStatusBarStyleDefault) {
+        self.fakeStatusBarView.alpha = 1.0f;
+        [UIView animateWithDuration:0.3 animations:^{
+            weakSelf.fakeStatusBarView.alpha = 0.0f;
+        }];
+    }
+    
     [self.childControllerContainerView bringSubviewToFront:self.centerContainerView];
-    [self.centerViewController.view setAutoresizingMask:UIViewAutoresizingFlexibleWidth|UIViewAutoresizingFlexibleHeight];
     [self updateShadowForCenterView];
     
     if(animated == NO){
@@ -504,7 +517,6 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
          closeOpenedDrawerAnimated:animated
          completion:^(BOOL finished) {
              if (forwardAppearanceMethodsToCenterViewController) {
-                 self.centerViewController.view.frame = self.centerContainerView.bounds;
                  [self.centerViewController endAppearanceTransition];
                  [self.centerViewController didMoveToParentViewController:self];
              }
@@ -1056,6 +1068,13 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
     return _dummyStatusBarView;
 }
 
+-(UIView*)fakeStatusBarView{
+    if(_fakeStatusBarView==nil){
+        _fakeStatusBarView = [[UIView alloc] initWithFrame:self.view.bounds];
+    }
+    return _fakeStatusBarView;
+}
+
 -(UIColor*)statusBarViewBackgroundColor{
     if(_statusBarViewBackgroundColor == nil){
         _statusBarViewBackgroundColor = [UIColor blackColor];
@@ -1085,6 +1104,9 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
             }
             else {
                 self.startingPanRect = self.centerContainerView.frame;
+            }
+            if (self.startingPanRect.origin.x == 0) {
+                [self captureStatusBar];
             }
         }
         case UIGestureRecognizerStateChanged:{
@@ -1148,13 +1170,6 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
 }
 
 #pragma mark - iOS 7 Status Bar Helpers
--(UIViewController*)childViewControllerForStatusBarStyle{
-    return [self childViewControllerForSide:self.openSide];
-}
-
--(UIViewController*)childViewControllerForStatusBarHidden{
-    return [self childViewControllerForSide:self.openSide];
-}
 
 -(void)setNeedsStatusBarAppearanceUpdateIfSupported{
     if([self respondsToSelector:@selector(setNeedsStatusBarAppearanceUpdate)]){
@@ -1209,7 +1224,52 @@ static NSString *MMDrawerOpenSideKey = @"MMDrawerOpenSide";
         if(completion){
             completion(NO);
         }
+        [self releaseStatusBar];
     }
+}
+
+-(BOOL)prefersStatusBarHidden{
+    return self.isStatusBarCaptured;
+}
+
+-(UIStatusBarAnimation)preferredStatusBarUpdateAnimation{
+    return UIStatusBarAnimationNone;
+}
+
+-(void)captureStatusBar{
+    if (self.isStatusBarCaptured) {
+        return;
+    }
+    
+    [self.fakeStatusBarView addSubview:[[UIScreen mainScreen] snapshotViewAfterScreenUpdates:NO]];
+    self.fakeStatusBarView.hidden = NO;
+    self.fakeStatusBarView.alpha = 1;
+    [self.centerContainerView addSubview:self.fakeStatusBarView];
+    
+    [UIView animateWithDuration:0.0 animations:^{
+        self.isStatusBarCaptured = YES;
+        [self setNeedsStatusBarAppearanceUpdate];
+        
+        CGFloat yOffset = MMDrawerStatusBarHeight;
+        self.centerViewController.view.frame = (CGRect){
+            .origin = (CGPoint){0, yOffset},
+            .size.width = self.centerContainerView.bounds.size.width,
+            .size.height = self.centerContainerView.bounds.size.height - yOffset,
+        };
+    }];
+}
+
+-(void)releaseStatusBar{
+    [self.fakeStatusBarView.subviews makeObjectsPerformSelector:@selector(removeFromSuperview)];
+    [self.fakeStatusBarView removeFromSuperview];
+    self.fakeStatusBarView.hidden = YES;
+
+    [UIView animateWithDuration:0.0 animations:^{
+        self.centerViewController.view.frame = self.centerContainerView.bounds;
+        
+        self.isStatusBarCaptured = NO;
+        [self setNeedsStatusBarAppearanceUpdate];
+    }];
 }
 
 -(void)updateDrawerVisualStateForDrawerSide:(MMDrawerSide)drawerSide percentVisible:(CGFloat)percentVisible{
